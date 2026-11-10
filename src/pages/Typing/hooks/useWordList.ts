@@ -1,6 +1,7 @@
 import { CHAPTER_LENGTH } from '@/constants'
-import { currentChapterAtom, currentDictInfoAtom, reviewModeInfoAtom } from '@/store'
+import { currentChapterAtom, currentDictInfoAtom, reviewModeInfoAtom, skipFamiliarWordsAtom } from '@/store'
 import type { Word, WordWithIndex } from '@/typings/index'
+import { useFamiliarWords } from '@/utils/db/familiar-words'
 import { wordListFetcher } from '@/utils/wordListFetcher'
 import { useAtom, useAtomValue } from 'jotai'
 import { useMemo } from 'react'
@@ -8,6 +9,15 @@ import useSWR from 'swr'
 
 export type UseWordListResult = {
   words: WordWithIndex[]
+  /** 因开启跳过熟词而被过滤掉的本章熟词 */
+  skippedFamiliarWords: Word[]
+  /** 当前章节中已标记的全部熟词（与是否开启跳过无关） */
+  chapterFamiliarWords: Word[]
+  chapterWordCount: number
+  skippedFamiliarCount: number
+  chapterFamiliarCount: number
+  isAllFamiliar: boolean
+  isFamiliarReady: boolean
   isLoading: boolean
   error: Error | undefined
 }
@@ -19,6 +29,8 @@ export function useWordList(): UseWordListResult {
   const currentDictInfo = useAtomValue(currentDictInfoAtom)
   const [currentChapter, setCurrentChapter] = useAtom(currentChapterAtom)
   const { isReviewMode, reviewRecord } = useAtomValue(reviewModeInfoAtom)
+  const skipFamiliarWords = useAtomValue(skipFamiliarWordsAtom)
+  const { familiarSet, isReady: isFamiliarReady } = useFamiliarWords(currentDictInfo.id)
 
   // Reset current chapter to 0, when currentChapter is greater than chapterCount.
   if (currentChapter >= currentDictInfo.chapterCount) {
@@ -28,37 +40,69 @@ export function useWordList(): UseWordListResult {
   const isFirstChapter = !isReviewMode && currentDictInfo.id === 'cet4' && currentChapter === 0
   const { data: wordList, error, isLoading } = useSWR(currentDictInfo.url, wordListFetcher)
 
-  const words: WordWithIndex[] = useMemo(() => {
-    let newWords: Word[]
-    if (isFirstChapter) {
-      newWords = firstChapter
-    } else if (isReviewMode) {
-      newWords = reviewRecord?.words ?? []
-    } else if (wordList) {
-      newWords = wordList.slice(currentChapter * CHAPTER_LENGTH, (currentChapter + 1) * CHAPTER_LENGTH)
-    } else {
-      newWords = []
-    }
-
-    // 记录原始 index, 并对 word.trans 做兜底处理
-    return newWords.map((word, index) => {
-      let trans: string[]
-      if (Array.isArray(word.trans)) {
-        trans = word.trans.filter((item) => typeof item === 'string')
-      } else if (word.trans === null || word.trans === undefined || typeof word.trans === 'object') {
-        trans = []
+  const { words, skippedFamiliarWords, chapterFamiliarWords, chapterWordCount, skippedFamiliarCount, chapterFamiliarCount, isAllFamiliar } =
+    useMemo(() => {
+      let newWords: Word[]
+      if (isFirstChapter) {
+        newWords = firstChapter
+      } else if (isReviewMode) {
+        newWords = reviewRecord?.words ?? []
+      } else if (wordList) {
+        newWords = wordList.slice(currentChapter * CHAPTER_LENGTH, (currentChapter + 1) * CHAPTER_LENGTH)
       } else {
-        trans = [String(word.trans)]
+        newWords = []
       }
-      return {
-        ...word,
-        index,
-        trans,
-      }
-    })
-  }, [isFirstChapter, isReviewMode, wordList, reviewRecord?.words, currentChapter])
 
-  return { words, isLoading, error }
+      const normalizeTrans = (word: Word): Word => {
+        let trans: string[]
+        if (Array.isArray(word.trans)) {
+          trans = word.trans.filter((item) => typeof item === 'string')
+        } else if (word.trans === null || word.trans === undefined || typeof word.trans === 'object') {
+          trans = []
+        } else {
+          trans = [String(word.trans)]
+        }
+        return { ...word, trans }
+      }
+
+      const chapterWordCount = newWords.length
+      const chapterFamiliarWords =
+        !isReviewMode && isFamiliarReady ? newWords.filter((word) => familiarSet.has(word.name)).map(normalizeTrans) : []
+      const chapterFamiliarCount = chapterFamiliarWords.length
+      const shouldSkipFamiliar = skipFamiliarWords && !isReviewMode && isFamiliarReady
+      const practiceWords = shouldSkipFamiliar ? newWords.filter((word) => !familiarSet.has(word.name)) : newWords
+      const skippedFamiliarWords = shouldSkipFamiliar ? chapterFamiliarWords : []
+      const skippedFamiliarCount = skippedFamiliarWords.length
+      const isAllFamiliar = shouldSkipFamiliar && chapterWordCount > 0 && practiceWords.length === 0
+
+      const words: WordWithIndex[] = practiceWords.map((word, index) => ({
+        ...normalizeTrans(word),
+        index,
+      }))
+
+      return {
+        words,
+        skippedFamiliarWords,
+        chapterFamiliarWords,
+        chapterWordCount,
+        skippedFamiliarCount,
+        chapterFamiliarCount,
+        isAllFamiliar,
+      }
+    }, [isFirstChapter, isReviewMode, wordList, reviewRecord?.words, currentChapter, skipFamiliarWords, familiarSet, isFamiliarReady])
+
+  return {
+    words,
+    skippedFamiliarWords,
+    chapterFamiliarWords,
+    chapterWordCount,
+    skippedFamiliarCount,
+    chapterFamiliarCount,
+    isAllFamiliar,
+    isFamiliarReady,
+    isLoading: isLoading || (skipFamiliarWords && !isReviewMode && !isFamiliarReady),
+    error,
+  }
 }
 
 const firstChapter = [

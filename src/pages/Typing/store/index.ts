@@ -59,6 +59,14 @@ export enum TypingStateActionType {
   SET_IS_LOOP_SINGLE_WORD = 'SET_IS_LOOP_SINGLE_WORD',
   TOGGLE_IS_LOOP_SINGLE_WORD = 'TOGGLE_IS_LOOP_SINGLE_WORD',
   SET_REVISION_INDEX = 'SET_REVISION_INDEX',
+  /** 将当前词标为熟词后从本章练习列表移除并进入下一词 */
+  MARK_FAMILIAR_AND_SKIP = 'MARK_FAMILIAR_AND_SKIP',
+  /** 从本章练习列表移除指定单词（用于词表中标记非当前熟词） */
+  REMOVE_WORD_BY_NAME = 'REMOVE_WORD_BY_NAME',
+  /** 将单词重新加入本章练习列表（取消熟词标记时） */
+  ADD_WORD_TO_CHAPTER = 'ADD_WORD_TO_CHAPTER',
+  /** 将本章标记为已完成（例如进入章节时已全部为熟词） */
+  SET_IS_FINISHED = 'SET_IS_FINISHED',
 }
 
 export type TypingStateAction =
@@ -86,6 +94,10 @@ export type TypingStateAction =
   | { type: TypingStateActionType.SET_IS_SAVING_RECORD; payload: boolean }
   | { type: TypingStateActionType.SET_IS_LOOP_SINGLE_WORD; payload: boolean }
   | { type: TypingStateActionType.TOGGLE_IS_LOOP_SINGLE_WORD }
+  | { type: TypingStateActionType.MARK_FAMILIAR_AND_SKIP }
+  | { type: TypingStateActionType.REMOVE_WORD_BY_NAME; payload: string }
+  | { type: TypingStateActionType.ADD_WORD_TO_CHAPTER; payload: WordWithIndex }
+  | { type: TypingStateActionType.SET_IS_FINISHED; payload: boolean }
 
 type Dispatch = (action: TypingStateAction) => void
 
@@ -215,6 +227,93 @@ export const typingReducer = (state: TypingState, action: TypingStateAction) => 
     }
     case TypingStateActionType.TOGGLE_IS_LOOP_SINGLE_WORD: {
       state.isLoopSingleWord = !state.isLoopSingleWord
+      break
+    }
+    case TypingStateActionType.MARK_FAMILIAR_AND_SKIP: {
+      const currentIndex = state.chapterData.index
+      if (currentIndex < 0 || currentIndex >= state.chapterData.words.length) {
+        break
+      }
+
+      state.chapterData.words.splice(currentIndex, 1)
+      state.chapterData.userInputLogs.splice(currentIndex, 1)
+      state.chapterData.userInputLogs.forEach((log, index) => {
+        log.index = index
+      })
+      state.chapterData.words.forEach((word, index) => {
+        word.index = index
+      })
+      state.isShowSkip = false
+
+      if (state.chapterData.words.length === 0) {
+        // 本章练习词已清空（例如全部标为熟词），直接进入过关
+        state.isTyping = false
+        state.isFinished = true
+      } else if (currentIndex >= state.chapterData.words.length) {
+        state.chapterData.index = state.chapterData.words.length - 1
+        state.isTyping = false
+        state.isFinished = true
+      } else {
+        state.chapterData.index = currentIndex
+      }
+      break
+    }
+    case TypingStateActionType.REMOVE_WORD_BY_NAME: {
+      const wordName = action.payload
+      const removeIndex = state.chapterData.words.findIndex((word) => word.name === wordName)
+      if (removeIndex < 0) {
+        break
+      }
+
+      const currentIndex = state.chapterData.index
+      state.chapterData.words.splice(removeIndex, 1)
+      state.chapterData.userInputLogs.splice(removeIndex, 1)
+      state.chapterData.userInputLogs.forEach((log, index) => {
+        log.index = index
+      })
+      state.chapterData.words.forEach((word, index) => {
+        word.index = index
+      })
+
+      if (state.chapterData.words.length === 0) {
+        state.chapterData.index = 0
+        state.isTyping = false
+        state.isFinished = true
+        break
+      }
+
+      if (removeIndex < currentIndex) {
+        state.chapterData.index = currentIndex - 1
+      } else if (removeIndex === currentIndex) {
+        if (currentIndex >= state.chapterData.words.length) {
+          state.chapterData.index = state.chapterData.words.length - 1
+          state.isTyping = false
+          state.isFinished = true
+        } else {
+          state.chapterData.index = currentIndex
+        }
+      }
+      break
+    }
+    case TypingStateActionType.ADD_WORD_TO_CHAPTER: {
+      const word = action.payload
+      if (state.chapterData.words.some((item) => item.name === word.name)) {
+        break
+      }
+      const nextIndex = state.chapterData.words.length
+      state.chapterData.words.push({ ...word, index: nextIndex })
+      state.chapterData.userInputLogs.push({ ...structuredClone(initialUserInputLog), index: nextIndex })
+      if (state.isFinished) {
+        state.isFinished = false
+      }
+      break
+    }
+    case TypingStateActionType.SET_IS_FINISHED: {
+      state.isFinished = action.payload
+      if (action.payload) {
+        state.isTyping = false
+        state.isShowSkip = false
+      }
       break
     }
     default: {

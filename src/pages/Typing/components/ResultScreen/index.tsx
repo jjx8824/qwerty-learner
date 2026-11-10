@@ -89,6 +89,9 @@ const ResultScreen = () => {
 
   const correctRate = useMemo(() => {
     const chapterLength = state.chapterData.words.length
+    if (chapterLength === 0) {
+      return 100
+    }
     const correctCount = chapterLength - wrongWords.length
     return Math.floor((correctCount / chapterLength) * 100)
   }, [state.chapterData.words.length, wrongWords.length])

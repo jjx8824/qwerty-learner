@@ -183,3 +183,23 @@ export class RevisionWordRecord implements IRevisionWordRecord {
     this.errorCount = errorCount
   }
 }
+
+export interface IFamiliarWord {
+  id?: number
+  dict: string
+  word: string
+  createTime: number
+}
+
+export class FamiliarWord implements IFamiliarWord {
+  id?: number
+  dict: string
+  word: string
+  createTime: number
+
+  constructor(dict: string, word: string) {
+    this.dict = dict
+    this.word = word
+    this.createTime = getUTCUnixTimestamp()
+  }
+}

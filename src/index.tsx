@@ -1,6 +1,7 @@
 import Loading from './components/Loading'
 import './index.css'
 import { ErrorBook } from './pages/ErrorBook'
+import { FamiliarBook } from './pages/FamiliarBook'
 import { FriendLinks } from './pages/FriendLinks'
 import MobilePage from './pages/Mobile'
 import TypingPage from './pages/Typing'
@@ -60,6 +61,7 @@ function Root() {
                 <Route path="/gallery" element={<GalleryPage />} />
                 <Route path="/analysis" element={<AnalysisPage />} />
                 <Route path="/error-book" element={<ErrorBook />} />
+                <Route path="/familiar-book" element={<FamiliarBook />} />
                 <Route path="/friend-links" element={<FriendLinks />} />
                 <Route path="/*" element={<Navigate to="/" />} />
               </>

@@ -8,34 +8,64 @@ import Switcher from './components/Switcher'
 import WordList from './components/WordList'
 import WordPanel from './components/WordPanel'
 import { useConfetti } from './hooks/useConfetti'
+import { useFamiliarWordHotkey } from './hooks/useFamiliarWordHotkey'
 import { useWordList } from './hooks/useWordList'
 import { TypingContext, TypingStateActionType, initialState, typingReducer } from './store'
 import { DonateCard } from '@/components/DonateCard'
 import Header from '@/components/Header'
 import Tooltip from '@/components/Tooltip'
 import { idDictionaryMap } from '@/resources/dictionary'
-import { currentChapterAtom, currentDictIdAtom, isReviewModeAtom, randomConfigAtom, reviewModeInfoAtom } from '@/store'
+import {
+  currentChapterAtom,
+  currentDictIdAtom,
+  isReviewModeAtom,
+  randomConfigAtom,
+  reviewModeInfoAtom,
+  skipFamiliarWordsAtom,
+} from '@/store'
 import { IsDesktop, isLegal } from '@/utils'
 import { useSaveChapterRecord } from '@/utils/db'
 import { useMixPanelChapterLogUploader } from '@/utils/mixpanel'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import type React from 'react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useImmerReducer } from 'use-immer'
+
+function FamiliarWordHotkeyBinder() {
+  useFamiliarWordHotkey()
+  return null
+}
 
 const App: React.FC = () => {
   const [state, dispatch] = useImmerReducer(typingReducer, structuredClone(initialState))
   const [isLoading, setIsLoading] = useState<boolean>(true)
-  const { words } = useWordList()
+  const { words, isAllFamiliar, isLoading: isWordListLoading } = useWordList()
 
   const [currentDictId, setCurrentDictId] = useAtom(currentDictIdAtom)
+  const currentChapter = useAtomValue(currentChapterAtom)
   const setCurrentChapter = useSetAtom(currentChapterAtom)
   const randomConfig = useAtomValue(randomConfigAtom)
+  const skipFamiliarWords = useAtomValue(skipFamiliarWordsAtom)
   const chapterLogUploader = useMixPanelChapterLogUploader(state)
   const saveChapterRecord = useSaveChapterRecord()
 
   const reviewModeInfo = useAtomValue(reviewModeInfoAtom)
   const isReviewMode = useAtomValue(isReviewModeAtom)
+
+  // 仅在词典 / 章节 / 复习 / 跳过熟词开关变化时重新装载章节，避免练习中途标熟触发整章重置
+  const chapterSetupKey = useMemo(() => {
+    if (isReviewMode) {
+      return `review:${currentDictId}:${reviewModeInfo.reviewRecord?.id ?? 'new'}:${reviewModeInfo.reviewRecord?.createTime ?? 0}`
+    }
+    return `chapter:${currentDictId}:${currentChapter}:skip=${skipFamiliarWords}`
+  }, [
+    isReviewMode,
+    currentDictId,
+    reviewModeInfo.reviewRecord?.id,
+    reviewModeInfo.reviewRecord?.createTime,
+    currentChapter,
+    skipFamiliarWords,
+  ])
 
   useEffect(() => {
     // 检测用户设备
@@ -74,13 +104,23 @@ const App: React.FC = () => {
   }, [dispatch])
 
   useEffect(() => {
-    state.chapterData.words?.length > 0 ? setIsLoading(false) : setIsLoading(true)
-  }, [state.chapterData.words])
+    // 词表为空（全是熟词）不是加载中，否则会一直转圈
+    setIsLoading(isWordListLoading)
+  }, [isWordListLoading])
 
   useEffect(() => {
     if (!state.isTyping) {
       const onKeyDown = (e: KeyboardEvent) => {
-        if (!isLoading && e.key !== 'Enter' && (isLegal(e.key) || e.key === ' ') && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        if (
+          !isLoading &&
+          !state.isFinished &&
+          state.chapterData.words.length > 0 &&
+          e.key !== 'Enter' &&
+          (isLegal(e.key) || e.key === ' ') &&
+          !e.altKey &&
+          !e.ctrlKey &&
+          !e.metaKey
+        ) {
           e.preventDefault()
           dispatch({ type: TypingStateActionType.SET_IS_TYPING, payload: true })
         }
@@ -89,9 +129,25 @@ const App: React.FC = () => {
 
       return () => window.removeEventListener('keydown', onKeyDown)
     }
-  }, [state.isTyping, isLoading, dispatch])
+  }, [state.isTyping, state.isFinished, state.chapterData.words.length, isLoading, dispatch])
 
   useEffect(() => {
+    if (isWordListLoading) {
+      return
+    }
+
+    // 开启跳过熟词且本章已全部为熟词：直接过关
+    // 注意：不要把 isAllFamiliar 放进依赖。练习中途把最后一词标熟后它会变为 true，
+    // 若因此重新 SETUP 会清空本章已产生的进度。
+    if (isAllFamiliar) {
+      dispatch({
+        type: TypingStateActionType.SETUP_CHAPTER,
+        payload: { words: [], shouldShuffle: false, initialIndex: 0 },
+      })
+      dispatch({ type: TypingStateActionType.SET_IS_FINISHED, payload: true })
+      return
+    }
+
     if (words !== undefined) {
       const initialIndex = isReviewMode && reviewModeInfo.reviewRecord?.index ? reviewModeInfo.reviewRecord.index : 0
 
@@ -101,7 +157,7 @@ const App: React.FC = () => {
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [words])
+  }, [chapterSetupKey, isWordListLoading])
 
   useEffect(() => {
     // 当用户完成章节后且完成 word Record 数据保存，记录 chapter Record 数据,
@@ -128,6 +184,7 @@ const App: React.FC = () => {
 
   return (
     <TypingContext.Provider value={{ state: state, dispatch }}>
+      <FamiliarWordHotkeyBinder />
       {state.isFinished && <DonateCard />}
       {state.isFinished && <ResultScreen />}
       <Layout>
@@ -135,7 +192,7 @@ const App: React.FC = () => {
           <DictChapterButton />
           <PronunciationSwitcher />
           <Switcher />
-          <StartButton isLoading={isLoading} />
+          <StartButton isLoading={isLoading || state.isFinished || state.chapterData.words.length === 0} />
           <Tooltip content="跳过该词">
             <button
               className={`${
@@ -158,7 +215,7 @@ const App: React.FC = () => {
                   ></div>
                 </div>
               ) : (
-                !state.isFinished && <WordPanel />
+                !state.isFinished && state.chapterData.words.length > 0 && <WordPanel />
               )}
             </div>
             <Speed />

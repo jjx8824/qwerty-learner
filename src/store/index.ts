@@ -108,6 +108,9 @@ export const wordDictationConfigAtom = atomForConfig('wordDictationConfig', {
   openBy: 'auto' as WordDictationOpenBy,
 })
 
+/** 练习单元时是否跳过已标记的熟词 */
+export const skipFamiliarWordsAtom = atomWithStorage('skipFamiliarWords', false)
+
 export const dismissStartCardDateAtom = atomWithStorage<Date | null>(DISMISS_START_CARD_DATE_KEY, null)
 
 // Enhanced version promotion popup state
